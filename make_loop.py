@@ -1,6 +1,7 @@
 """Make reversed loop video."""
 import argparse
 import cv2
+import logging
 import os
 from subprocess import run
 
@@ -39,6 +40,15 @@ def parse_args() -> argparse.Namespace:
         help='Frames per second for target file.'
     )
 
+    parser.add_argument(
+        '--target_duration',
+        dest='target_duration',
+        type=float,
+        required=False,
+        default=8.0,
+        help='Duration of target video in seconds.'
+    )
+
     return parser.parse_args()
 
 
@@ -54,42 +64,38 @@ def get_fps(video_path: str) -> float:
     return fps
 
 
-def get_video_duration(video_path: str) -> float:
+def get_video_frames_count(video_path: str) -> float:
     """
-    Get video file duration in seconds.
+    Get video file frames count.
 
     :param video_path: path to the video
-    :return: duratin of the video in seconds
+    :return: video frames count
     """
     video = cv2.VideoCapture(video_path)
-    video.set(cv2.CAP_PROP_POS_AVI_RATIO, 1)
-    return video.get(cv2.CAP_PROP_POS_MSEC) / 1000
+    return int(video.get(cv2.CAP_PROP_FRAME_COUNT))
 
 
 def main(args) -> None:
     """Main script."""
-    input_video_duration = get_video_duration(input_file_path)
-    input_video_fps = get_fps(input_file_path)
+    input_video_frames_count = get_video_frames_count(args.input_file_path)
+    input_video_fps = get_fps(args.input_file_path)
+    input_video_duration = input_video_frames_count / input_video_fps
 
-    looped_file_path = input_file_path.split('.')[0] + '_looped.mp4'
-    looped_video_frames_count = int(input_video_fps * input_video_duration * 2)
+    looped_file_path = args.input_file_path.split('.')[0] + '_looped.mp4'
+    looped_video_frames_count = input_video_frames_count * 2
+
     make_loop_cmd = [
         'ffmpeg',
         '-i',
-        input_file_path,
+        args.input_file_path,
         '-filter_complex',
-        f'"[0]reverse[r];[0][r]concat,loop=0:{looped_video_frames_count},setpts=N/{input_video_fps}/TB"',
+        f'[0]reverse[r];[0][r]concat,loop=0:{looped_video_frames_count},setpts=N/{input_video_fps}/TB',
         looped_file_path
     ]
-
-    completed_process = run(make_loop_cmd, shell=True, capture_output=True, text=True)
-    if completed_process.returncode != 0:
-        print('Someting went wrong. Exiting...')
-        return
+    run(make_loop_cmd)
 
     looped_video_duration = input_video_duration * 2
-    target_duration = get_video_duration(output_file_path)
-    speed_changing_coefficient = target_duration / looped_video_duration
+    speed_changing_coefficient = args.target_duration / looped_video_duration
 
     change_speed_cmd = [
         'ffmpeg',
@@ -99,16 +105,14 @@ def main(args) -> None:
         'h264',
         '-an',
         '-vf',
-        f'"fps={args.target_fps}, setpts={speed_changing_coefficient}*PTS"',
-        output_file_path
+        f'fps={args.target_fps}, setpts={speed_changing_coefficient}*PTS',
+        args.output_file_path
     ]
-
-    completed_process = run(change_speed_cmd, shell=True, capture_output=True, text=True)
-    if completed_process.returncode != 0:
-        print('Someting went wrong. Exiting...')
-        return
+    run(change_speed_cmd)
 
     os.remove(looped_file_path)
+
+    logging.info(f'All done! Video saved to {args.output_file_path}')
 
 
 if __name__ == '__main__':
